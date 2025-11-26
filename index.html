@@ -8,6 +8,7 @@
         margin: 0;
         background: #87CEEB;
         overflow: hidden;
+        font-family: Arial, sans-serif;
     }
     canvas {
         display: block;
@@ -18,11 +19,75 @@
         top: 0; bottom: 0; left: 0; right: 0;
         background: #000; /* fallback background */
     }
+
+    /* Overlay for game over / messages */
+    #overlay {
+        position: absolute;
+        left: 0; right: 0; top: 0; bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+    }
+    #overlay .card {
+        pointer-events: auto;
+        background: rgba(0,0,0,0.75);
+        color: white;
+        padding: 24px 32px;
+        border-radius: 8px;
+        text-align: center;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+        transform: scale(0.9);
+        opacity: 0;
+        transition: transform 180ms ease, opacity 180ms ease;
+    }
+    #overlay.visible .card {
+        transform: scale(1);
+        opacity: 1;
+    }
+    #overlay h1 {
+        margin: 0 0 12px 0;
+        font-size: 36px;
+        color: yellow;
+    }
+    #overlay p {
+        margin: 0 0 16px 0;
+        font-size: 16px;
+    }
+    #overlay button {
+        background: #28a745;
+        color: white;
+        border: none;
+        padding: 8px 14px;
+        font-size: 16px;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+    #overlay button:hover { filter: brightness(1.05); }
+    #hint {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        color: white;
+        font-size: 13px;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+    }
 </style>
 </head>
 <body>
 
 <canvas id="game" width="800" height="400"></canvas>
+
+<!-- Overlay element for Game Over / Win messages -->
+<div id="overlay" aria-hidden="true">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="ov-title">
+        <h1 id="ov-title">Game Over</h1>
+        <p id="ov-text">You lost — hit an obstacle. Press <strong>R</strong> or the Restart button to try again.</p>
+        <button id="restartBtn">Restart (R)</button>
+    </div>
+</div>
+
+<div id="hint">Controls: ← → move • Space jump • X shoot • Z leap</div>
 
 <script>
 const canvas = document.getElementById("game");
@@ -32,6 +97,18 @@ const ctx = canvas.getContext("2d");
 const keys = {};
 window.onkeydown = e => keys[e.code] = true;
 window.onkeyup = e => keys[e.code] = false;
+
+// Also listen for R to restart
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyR') {
+        resetGame();
+    }
+});
+
+// Overlay
+const overlay = document.getElementById('overlay');
+const restartBtn = document.getElementById('restartBtn');
+restartBtn.addEventListener('click', resetGame);
 
 // Player
 const sonic = {
@@ -98,9 +175,31 @@ let explosives = [];
 let ringsCollected = 0;
 let camX = 0;
 let gameWon = false;
+let gameOver = false; // <-- new flag
 
-// Reset the entire game
+// Show loss message (overlay)
+function loseGame(reason) {
+    if (gameOver || gameWon) return;
+    gameOver = true;
+    // update message if provided
+    if (reason) {
+        const txt = document.getElementById('ov-text');
+        txt.innerHTML = reason + " <br><strong>Press R or Restart to try again.</strong>";
+    }
+    overlay.classList.add('visible');
+    overlay.setAttribute('aria-hidden', 'false');
+}
+
+// Reset the entire game (hide overlay and reset state)
 function resetGame() {
+    // Hide overlay
+    overlay.classList.remove('visible');
+    overlay.setAttribute('aria-hidden', 'true');
+
+    // Reset flags
+    gameOver = false;
+    gameWon = false;
+
     // Reset Sonic
     sonic.x = 50;
     sonic.y = 120;
@@ -126,7 +225,8 @@ function resetGame() {
     bullets = [];
     explosives = [];
 
-    gameWon = false;
+    // Reset camera
+    camX = 0;
 }
 
 // Draw background inspired by Green Hill Zone
@@ -278,6 +378,7 @@ function drawBoss() {
 
 // Collect rings
 function updateRingCollection() {
+    if (gameOver || gameWon) return;
     for (let r of rings) {
         if (!r.active) continue;
         let dx = sonic.x + sonic.w/2 - r.x;
@@ -291,6 +392,7 @@ function updateRingCollection() {
 
 // Update regular enemy
 function updateEnemy() {
+    if (gameOver || gameWon) return;
     enemy.x += enemy.vx;
     if (enemy.x < enemy.leftLimit || enemy.x > enemy.rightLimit) enemy.vx *= -1;
 
@@ -300,14 +402,14 @@ function updateEnemy() {
             enemy.x = -9999;
             sonic.vy = -5;
         } else {
-            resetGame();
+            loseGame("You hit the enemy!");
         }
     }
 }
 
 // Update player
 function updatePlayer() {
-    if(gameWon) return;
+    if(gameWon || gameOver) return;
 
     if (keys["ArrowRight"]) { sonic.vx = sonic.speed; sonic.facing = 1; }
     else if (keys["ArrowLeft"])  { sonic.vx = -sonic.speed; sonic.facing = -1; }
@@ -356,17 +458,18 @@ function updatePlayer() {
             sonic.x + sonic.w > h.x &&
             sonic.y < h.y + h.h &&
             sonic.y + sonic.h > h.y) {
-            resetGame();
+            loseGame("You hit a mine!");
         }
     }
 
     if (sonic.y > 300) {
-        resetGame();
+        loseGame("You fell off the map!");
     }
 }
 
 // Update moving hazards
 function updateHazards() {
+    if (gameOver || gameWon) return;
     for (let h of hazards) {
         if (h.type === "mine") {
             h.x += 1.2 * h.dir;
@@ -401,7 +504,7 @@ function drawUI() {
 
 // Update bullets
 function updateBullets() {
-    if(gameWon) return;
+    if(gameWon || gameOver) return;
     for(let i=bullets.length-1;i>=0;i--){
         let b = bullets[i];
         b.x += b.vx;
@@ -424,7 +527,7 @@ function updateBullets() {
 
 // Update boss
 function updateBoss() {
-    if(gameWon) return;
+    if(gameWon || gameOver) return;
 
     if(boss.alive){
         boss.x += boss.vx;
@@ -446,13 +549,19 @@ function updateBoss() {
         if(boss.y > 300){
             boss.falling = false;
             gameWon = true;
+            // show win overlay too
+            const txt = document.getElementById('ov-text');
+            txt.innerHTML = "Congratulations! You defeated the boss! Press R to play again.";
+            document.getElementById('ov-title').textContent = "You Win!";
+            overlay.classList.add('visible');
+            overlay.setAttribute('aria-hidden', 'false');
         }
     }
 }
 
 // Update explosives
 function updateExplosives() {
-    if(gameWon) return;
+    if(gameWon || gameOver) return;
     for(let i=explosives.length-1;i>=0;i--){
         let e = explosives[i];
         e.x += e.vx;
@@ -466,8 +575,8 @@ function updateExplosives() {
 
         if(e.x < sonic.x + sonic.w && e.x + 6 > sonic.x &&
            e.y < sonic.y + sonic.h && e.y + 6 > sonic.y){
-            resetGame();
             explosives.splice(i,1);
+            loseGame("Explosion hit you!");
         }
     }
 }
@@ -502,6 +611,7 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
+// start
 gameLoop();
 </script>
 </body>
